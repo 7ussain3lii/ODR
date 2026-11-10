@@ -81,12 +81,16 @@ export default function Page(){
  }catch(e){setNotice(e instanceof Error?e.message:String(e))}finally{setBusy(false)}}
  async function uploadTargets(file:File){if(!sb||!session?.admin)return;setBusy(true);try{
   const book=XLSX.read(await file.arrayBuffer());const sheet=book.Sheets['Agent View']||book.Sheets[book.SheetNames[0]];const data=XLSX.utils.sheet_to_json<Record<string,unknown>>(sheet,{defval:''});
-  if(!data.length||!('TABS' in data[0]))throw Error('Expected an Agent View worksheet with a TABS column.');
+  if(!data.length||!('TABS' in data[0]))throw Error('Expected a worksheet with a TABS column.');
+  const newFormat='Name' in data[0]&&['POST','MBB','BB'].every(k=>k in data[0]);
+  const oldFormat='Names' in data[0]&&['Cons Postpaid','HBB','HBB+Fiber Target'].every(k=>k in data[0]);
+  if(!newFormat&&!oldFormat)throw Error('Unrecognized target columns. Expected Name / POST / MBB / BB or Names / Cons Postpaid / HBB / HBB+Fiber Target.');
   const directory:Agent[]=[],targetRows:Target[]=[];
-  for(const row of data){const tabs=String(row.TABS||'').trim().toUpperCase();if(!/^[A-Z0-9]{4,20}$/.test(tabs)||!row.Names)continue;const isLeader=String(row.Level||'').toLowerCase().includes('team leader');directory.push({tabs,full_name:String(row.Names).trim(),team_leader:String(row.TL||'')||null,is_team_leader:isLeader});
-   for(const [segment,column] of [['postpaid','Cons Postpaid'],['mbb','HBB'],['bb','HBB+Fiber Target']] as [Segment,string][]){let n=Number(row[column]);if(!Number.isFinite(n)||n<0){n=0}targetRows.push({month:`${month}-01`,tabs,segment,target:n})}
+  for(const row of data){const tabs=String(row.TABS||'').trim().toUpperCase(),name=String(row[newFormat?'Name':'Names']||'').trim();if(!/^[A-Z0-9]{4,20}$/.test(tabs)||!name)continue;const isLeader=String(row.Level||row['Agent Type']||'').toLowerCase().includes('team leader');directory.push({tabs,full_name:name,team_leader:String(row.TL||'').trim()||null,is_team_leader:isLeader});
+   for(const [segment,column] of (newFormat?[['postpaid','POST'],['mbb','MBB'],['bb','BB']]:[['postpaid','Cons Postpaid'],['mbb','HBB'],['bb','HBB+Fiber Target']]) as [Segment,string][]){let n=Number(row[column]);if(!Number.isFinite(n)||n<0){n=0}targetRows.push({month:`${month}-01`,tabs,segment,target:n})}
   }
   if(!directory.length)throw Error('No valid TABS users found.');
+  if(new Set(directory.map(a=>a.tabs)).size!==directory.length)throw Error('Duplicate TABS usernames in target file. Correct them before uploading.');
   if(!confirm(`Import ${directory.length} agents and monthly targets for ${month}?`))return;
   const {error:targetError}=await sb.rpc('replace_odr_targets',{p_month:`${month}-01`,p_agents:directory,p_targets:targetRows});if(targetError)throw targetError;
   await sb.from('import_audit').insert({kind:'targets',month:`${month}-01`,rows_processed:directory.length});setNotice(`${directory.length} agent target records imported.`);await reload();
