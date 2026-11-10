@@ -1,0 +1,70 @@
+'use client';
+import {useEffect,useMemo,useState} from 'react';
+import * as XLSX from 'xlsx';
+import {browserClient,tabsEmail} from '../lib/supabase';
+import {classify,daysInMonth,project,rate,rating,segments,segmentNames,type Segment} from '../lib/metrics';
+
+type Agent={tabs:string;full_name:string;team_leader:string|null};
+type Target={tabs:string;segment:Segment;target:number;month:string};
+type Actual={tabs:string;segment:Segment;actual:number;month:string;last_transaction_date:string};
+const sb=process.env.NEXT_PUBLIC_SUPABASE_URL?browserClient():null;
+const monthNow=()=>new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Bahrain',year:'numeric',month:'2-digit'}).slice(0,7);
+function csvRows(text:string){
+  const rows:string[][]=[];let row:string[]=[],field='',quoted=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];if(c==='"'){if(quoted&&text[i+1]==='"'){field+='"';i++}else quoted=!quoted}
+    else if(c===','&&!quoted){row.push(field);field=''}
+    else if((c==='\n'||c==='\r')&&!quoted){if(c==='\r'&&text[i+1]==='\n')i++;row.push(field);rows.push(row);row=[];field=''}
+    else field+=c;
+  }
+  if(field||row.length){row.push(field);rows.push(row)}
+  const [headers,...values]=rows;return values.map(row=>Object.fromEntries(headers.map((h,i)=>[h.replace(/^\uFEFF/,''),row[i]||''])));
+}
+function parseDate(raw:string){const m=raw.match(/^(\d{2})-([A-Z]{3})-(\d{2,4})$/i);if(!m)return /^\d{4}-\d{2}-\d{2}$/.test(raw)?raw:null;const months=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];const n=months.indexOf(m[2].toUpperCase());if(n<0)return null;const y=Number(m[3]);return `${y<100?2000+y:y}-${String(n+1).padStart(2,'0')}-${m[1]}`}
+const statusClass=(r:number)=>r>=90?'excellent':r>=85?'good':r>=75?'decent':'below';
+function fmt(n:number){return Number.isInteger(n)?n.toLocaleString():n.toLocaleString(undefined,{maximumFractionDigits:1})}
+export default function Page(){
+ const [tabs,setTabs]=useState('');const [password,setPassword]=useState('');const [session,setSession]=useState<null|{id:string;admin:boolean;tabs:string}>(null);
+ const [agents,setAgents]=useState<Agent[]>([]),[targets,setTargets]=useState<Target[]>([]),[actuals,setActuals]=useState<Actual[]>([]);
+ const [month,setMonth]=useState(monthNow()),[view,setView]=useState('overview'),[selected,setSelected]=useState('');
+ const [busy,setBusy]=useState(false),[notice,setNotice]=useState('');
+ async function reload(){if(!sb)return;const [a,t,s]=await Promise.all([sb.from('agent_directory').select('*'),sb.from('monthly_targets').select('*'),sb.from('monthly_actuals').select('*')]);const err=a.error||t.error||s.error;if(err){setNotice(err.message);return}setAgents(a.data||[]);setTargets((t.data||[]).map(x=>({...x,target:Number(x.target),month:x.month.slice(0,7)})));setActuals((s.data||[]).map(x=>({...x,month:x.month.slice(0,7)})))}
+ useEffect(()=>{if(!sb)return;sb.auth.getUser().then(({data})=>{if(data.user){setSession({id:data.user.id,admin:data.user.app_metadata?.role==='admin',tabs:data.user.app_metadata?.tabs||''});reload()}})},[]);
+ async function signIn(e:React.FormEvent){e.preventDefault();if(!sb)return setNotice('Supabase connection is not configured yet.');setBusy(true);const {data,error}=await sb.auth.signInWithPassword({email:tabsEmail(tabs),password});setBusy(false);if(error)return setNotice('Invalid TABS username or password.');setSession({id:data.user.id,admin:data.user.app_metadata?.role==='admin',tabs:data.user.app_metadata?.tabs||''});setNotice('');await reload()}
+ async function signOut(){await sb?.auth.signOut();setSession(null);setAgents([]);setTargets([]);setActuals([])}
+ const people=useMemo(()=>agents.filter(a=>session?.admin||a.tabs===session?.tabs),[agents,session]);
+ const metrics=useMemo(()=>people.map(agent=>{
+   const values=Object.fromEntries(segments.map(seg=>{const t=targets.find(t=>t.month===month&&t.tabs===agent.tabs&&t.segment===seg)?.target||0;const a=actuals.find(a=>a.month===month&&a.tabs===agent.tabs&&a.segment===seg);const actual=a?.actual||0;const projection=project(actual,a?.last_transaction_date||'',month);return [seg,{target:t,actual,projection,achievement:rate(actual,t),runRate:rate(projection,t)}]})) as Record<Segment,{target:number;actual:number;projection:number;achievement:number;runRate:number}>;return {...agent,values}
+ }),[people,targets,actuals,month]);
+ const shown=metrics.filter(a=>!selected||a.tabs===selected);const totals=Object.fromEntries(segments.map(seg=>{const target=shown.reduce((s,a)=>s+a.values[seg].target,0),actual=shown.reduce((s,a)=>s+a.values[seg].actual,0),projection=shown.reduce((s,a)=>s+a.values[seg].projection,0);return [seg,{target,actual,projection,achievement:rate(actual,target),runRate:rate(projection,target)}]})) as Record<Segment,{target:number;actual:number;projection:number;achievement:number;runRate:number}>;
+ const latest=actuals.filter(a=>a.month===month).map(a=>a.last_transaction_date).sort().at(-1);
+ async function uploadSales(file:File){if(!sb||!session?.admin)return;setBusy(true);try{
+  const rows=csvRows(await file.text());if(!rows.length||!('ENTERBY' in rows[0])||!('SEGMENT_CLASSIFICATION' in rows[0])||!('COMPLETE_DATE' in rows[0]))throw Error('CSV headers do not match the ODR sales report.');
+  const counts=new Map<string,number>();let maxDate='';let valid=0;
+  for(const row of rows){const date=parseDate(row.COMPLETE_DATE||'');if(!date||!date.startsWith(month))continue;maxDate=date>maxDate?date:maxDate;const seg=classify(row.SEGMENT_CLASSIFICATION||'');const tabs=(row.ENTERBY||'').trim().toUpperCase();if(!seg||!tabs)continue;valid++;const key=`${tabs}|${seg}`;counts.set(key,(counts.get(key)||0)+1)}
+  if(!valid)throw Error('No recognized sales rows in the selected month.');
+  const unknown=[...counts.keys()].map(k=>k.split('|')[0]).filter(t=>!agents.some(a=>a.tabs===t));if(unknown.length)throw Error(`Unknown TABS IDs (${[...new Set(unknown)].slice(0,8).join(', ')}). Import the agent target file first.`);
+  if(!confirm(`Replace sales for ${month} with ${valid} classified transactions, as of ${maxDate}?`))return;
+  const {error:del}=await sb.from('monthly_actuals').delete().eq('month',`${month}-01`);if(del)throw del;
+  const data=[...counts].map(([key,actual])=>{const [tabs,segment]=key.split('|');return {month:`${month}-01`,tabs,segment,actual,last_transaction_date:maxDate}});
+  const {error}=await sb.from('monthly_actuals').insert(data);if(error)throw error;
+  await sb.from('import_audit').insert({kind:'sales',month:`${month}-01`,rows_processed:valid});setNotice(`Sales imported: ${valid} transactions through ${maxDate}.`);await reload();
+ }catch(e){setNotice(e instanceof Error?e.message:String(e))}finally{setBusy(false)}}
+ async function uploadTargets(file:File){if(!sb||!session?.admin)return;setBusy(true);try{
+  const book=XLSX.read(await file.arrayBuffer());const sheet=book.Sheets['Agent View']||book.Sheets[book.SheetNames[0]];const data=XLSX.utils.sheet_to_json<Record<string,unknown>>(sheet,{defval:''});
+  if(!data.length||!('TABS' in data[0]))throw Error('Expected an Agent View worksheet with a TABS column.');
+  const directory:Agent[]=[],targetRows:Target[]=[];
+  for(const row of data){const tabs=String(row.TABS||'').trim().toUpperCase();if(!/^[A-Z0-9]{4,20}$/.test(tabs)||!row.Names)continue;directory.push({tabs,full_name:String(row.Names).trim(),team_leader:String(row.TL||'')||null});
+   for(const [segment,column] of [['postpaid','Cons Postpaid'],['mbb','HBB'],['bb','HBB+Fiber Target']] as [Segment,string][]){let n=Number(row[column]);if(!Number.isFinite(n)||n<0){n=0}targetRows.push({month:`${month}-01`,tabs,segment,target:n})}
+  }
+  if(!directory.length)throw Error('No valid TABS users found.');
+  if(!confirm(`Import ${directory.length} agents and monthly targets for ${month}?`))return;
+  const {error:agentsError}=await sb.from('agent_directory').upsert(directory);if(agentsError)throw agentsError;
+  const {error:targetError}=await sb.from('monthly_targets').upsert(targetRows);if(targetError)throw targetError;
+  await sb.from('import_audit').insert({kind:'targets',month:`${month}-01`,rows_processed:directory.length});setNotice(`${directory.length} agent target records imported.`);await reload();
+ }catch(e){setNotice(e instanceof Error?e.message:String(e))}finally{setBusy(false)}}
+ if(!session)return <main className="login"><div className="login-card"><div className="mark">Z<span>•</span></div><p className="eyebrow">ZAIN BAHRAIN · ODR</p><h1>Target Update</h1><p className="muted">Your performance, in focus.</p><form onSubmit={signIn}><label>TABS username<input value={tabs} onChange={e=>setTabs(e.target.value)} placeholder="e.g. BF01536" required autoCapitalize="characters"/></label><label>Password<input value={password} onChange={e=>setPassword(e.target.value)} type="password" required placeholder="Enter your password"/></label><button disabled={busy} className="primary">{busy?'Signing in…':'Sign in →'}</button></form>{notice&&<p className="error">{notice}</p>}<small>Access is limited to authorized ODR team members.</small></div></main>;
+ return <div className="shell"><aside><div className="brand"><div className="mark">Z<span>•</span></div><div><strong>Target Update</strong><small>ODR PERFORMANCE</small></div></div><nav><button onClick={()=>setView('overview')} className={view==='overview'?'active':''}>◫ <span>Overview</span></button><button onClick={()=>setView('agents')} className={view==='agents'?'active':''}>♙ <span>{session.admin?'Agents':'My performance'}</span></button>{session.admin&&<button onClick={()=>setView('imports')} className={view==='imports'?'active':''}>⇧ <span>Data uploads</span></button>}</nav><div className="side-bottom"><div className="avatar">{session.admin?'A':session.tabs.slice(0,2)}</div><div><strong>{session.admin?'Administrator':session.tabs}</strong><small>{session.admin?'Full team access':'Personal access'}</small></div><button className="logout" onClick={signOut}>↪</button></div></aside><main className="content"><header><div><p className="eyebrow">ODR SALES INTELLIGENCE</p><h1>{view==='imports'?'Data uploads':view==='agents'?(session.admin?'Agent performance':'My performance'):'Performance overview'}</h1><p className="muted">Track progress, keep your team moving forward.</p></div><div className="toolbar"><label>Reporting month<input type="month" value={month} onChange={e=>{setMonth(e.target.value);setSelected('')}}/></label>{session.admin&&<label>Agent<select value={selected} onChange={e=>setSelected(e.target.value)}><option value="">All agents</option>{agents.map(a=><option key={a.tabs} value={a.tabs}>{a.full_name}</option>)}</select></label>}</div></header>{notice&&<div className="notice" role="status">{notice}<button onClick={()=>setNotice('')}>×</button></div>}
+ {view==='imports'&&session.admin?<div className="uploads"><div className="panel"><div className="tile-icon">↥</div><h2>Monthly targets</h2><p>Upload the Excel master sheet. We read the <b>Agent View</b> tab, match each TABS ID, and update Postpaid, MBB and BB targets for {month}.</p><label className="upload-button">{busy?'Working…':'Select Excel file'}<input disabled={busy} type="file" accept=".xlsx,.xlsm,.xls" onChange={e=>{const f=e.target.files?.[0];if(f)uploadTargets(f);e.target.value=''}}/></label></div><div className="panel"><div className="tile-icon">▤</div><h2>Sales actuals</h2><p>Upload the official <b>MTD_ODR_SALES_REPORT.csv</b>. The report replaces the selected month snapshot; projections use its latest COMPLETE_DATE.</p><label className="upload-button">{busy?'Working…':'Select sales CSV'}<input disabled={busy} type="file" accept=".csv,text/csv" onChange={e=>{const f=e.target.files?.[0];if(f)uploadSales(f);e.target.value=''}}/></label></div></div>:<><div className="strip"><span className="dot"/> <b>{month}</b><span>Latest transaction date: <strong>{latest||'Not uploaded yet'}</strong></span><span className="right">{session.admin?'Team combined view':'Individual agent view'} · {metrics.length} {metrics.length===1?'agent':'agents'}</span></div><div className="cards">{segments.map(seg=>{const t=totals[seg];return <section className="metric" key={seg}><div className="metric-top"><span>{segmentNames[seg]}</span><span className={`pill ${statusClass(t.runRate)}`}>{t.target?rating(t.runRate):'No target'}</span></div><div className="big">{fmt(t.actual)} <small>/ {fmt(t.target)}</small></div><div className="progress"><span style={{width:`${Math.min(t.achievement,100)}%`}}/></div><div className="metric-row"><span>Achievement <b>{t.achievement.toFixed(1)}%</b></span><span>Run rate <b>{t.runRate.toFixed(1)}%</b></span></div><div className="projection">Projected month-end <strong>{fmt(Math.round(t.projection))}</strong></div></section>})}</div><div className="panel"><div className="panel-head"><div><h2>{session.admin?'Agent leaderboard':'My segment breakdown'}</h2><p>Separate targets and pacing for every segment</p></div><span className="small-label">{daysInMonth(month)} days in month</span></div><div className="table-scroll"><table><thead><tr><th>Agent</th><th>Segment</th><th>Target</th><th>Actual</th><th>Achievement</th><th>Month-end</th><th>Run rate</th><th>Status</th></tr></thead><tbody>{shown.flatMap(agent=>segments.map(seg=>{const v=agent.values[seg];return <tr key={agent.tabs+seg}><td><strong>{agent.full_name}</strong><small>{agent.tabs}</small></td><td>{segmentNames[seg]}</td><td>{fmt(v.target)}</td><td><b>{fmt(v.actual)}</b></td><td>{v.achievement.toFixed(1)}%</td><td>{fmt(Math.round(v.projection))}</td><td><b>{v.runRate.toFixed(1)}%</b></td><td><span className={`pill ${statusClass(v.runRate)}`}>{v.target?rating(v.runRate):'No target'}</span></td></tr>}))}{!shown.length&&<tr><td colSpan={8} className="empty">No records for this account or month. {session.admin?'Upload the monthly targets to begin.':'Contact your administrator.'}</td></tr>}</tbody></table></div></div></>}
+ <footer>Target Update · Zain Bahrain ODR · Data access controlled by account permissions</footer></main></div>
+}
