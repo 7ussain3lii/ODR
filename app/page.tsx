@@ -7,7 +7,7 @@ import {classify,daysInMonth,project,rate,rating,segments,segmentNames,type Segm
 type Agent={tabs:string;full_name:string;team_leader:string|null};
 type Target={tabs:string;segment:Segment;target:number;month:string};
 type Actual={tabs:string;segment:Segment;actual:number;month:string;last_transaction_date:string};
-const sb=process.env.NEXT_PUBLIC_SUPABASE_URL?browserClient():null;
+const sb=process.env.NEXT_PUBLIC_SUPABASE_URL&&process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?browserClient():null;
 const monthNow=()=>new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Bahrain',year:'numeric',month:'2-digit'}).slice(0,7);
 function csvRows(text:string){
   const rows:string[][]=[];let row:string[]=[],field='',quoted=false;
