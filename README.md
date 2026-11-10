@@ -11,6 +11,9 @@ Separate ODR sales-performance application. It is **not** the existing Target Up
 - Separate Postpaid (`Cons Postpaid`, `HAC`), MBB (`HBB`) and Broadband (`HBB-5G`, `Fiber - FTTH`) counts.
 - Projected month-end = actual / day of last completed transaction × number of days in the month. Run rate = projected / target.
 - Pace bands: Excellent ≥90%, Good ≥85%, Decent ≥75%, Below pace <75%.
+- Department → Team Leader → Agent reporting and daily points charts; team-leader summary rows are excluded from rollups.
+- INFO_CHANNEL breakdown for department reporting; subscriber numbers are retained with agent-level RLS.
+- Campaign mapping is package-code based. Admin can edit rules and override an individual subscriber's points without losing that override on a monthly report reupload.
 
 ## Setup
 
@@ -20,6 +23,10 @@ Separate ODR sales-performance application. It is **not** the existing Target Up
 4. Create Vercel environment variables from `.env.example` (publishable key only; do not expose secret keys to the browser).
 5. `npm install && npm run build`; deploy to a **separate Vercel project** connected to a new private GitHub repository.
 6. Admin logs in and uploads the monthly targets before the CSV. In this first prototype, individual agent accounts must be provisioned by a trusted admin script or Auth Admin API, with each user's `app_metadata.tabs` set to their TABS username. Never allow an agent to select their own TABS mapping.
+
+### ODR dashboard enhancement
+
+Before deploying the new dashboard, run `supabase/odr-enhancements.sql` **once** in the dedicated ODR project's SQL Editor. It adds transaction-level sales, point rules, preserved overrides, and reporting snapshots. It leaves the prior tables and accounts intact. Test the policies with separate agent credentials before general rollout.
 
 ## Cautions before production
 
