@@ -1,6 +1,10 @@
-.agent-performance-table{min-width:1050px;table-layout:fixed}
-.agent-performance-table th:first-child,.agent-performance-table td:first-child{width:22%;min-width:190px}
-.agent-performance-table th:not(:first-child),.agent-performance-table td:not(:first-child){width:26%}
+.agent-performance-table{min-width:1280px;table-layout:fixed}
+.agent-performance-table th:first-child,.agent-performance-table td:first-child{width:18%;min-width:190px}
+.agent-performance-table th:nth-child(2),.agent-performance-table td:nth-child(2),
+.agent-performance-table th:nth-child(3),.agent-performance-table td:nth-child(3),
+.agent-performance-table th:nth-child(4),.agent-performance-table td:nth-child(4){width:22%}
+.agent-performance-table th:nth-child(5),.agent-performance-table td:nth-child(5){width:8%}
+.agent-performance-table th:nth-child(6),.agent-performance-table td:nth-child(6){width:8%}
 .agent-performance-table tbody td{vertical-align:middle;padding-top:16px;padding-bottom:16px}
 .agent-performance-table tbody tr:hover{background:#fbf9ff}
 .segment-result{display:grid;justify-items:start;gap:6px}
@@ -11,3 +15,4 @@
 .segment-result-detail span:last-child{grid-column:1/-1}
 .segment-result-detail b{color:#293950}
 .segment-result .pill{margin-top:2px}
+.agent-total-target,.agent-total-rate{display:block;font-size:17px;margin-bottom:6px}
