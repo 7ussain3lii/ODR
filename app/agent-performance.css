@@ -1,0 +1,13 @@
+.agent-performance-table{min-width:1050px;table-layout:fixed}
+.agent-performance-table th:first-child,.agent-performance-table td:first-child{width:22%;min-width:190px}
+.agent-performance-table th:not(:first-child),.agent-performance-table td:not(:first-child){width:26%}
+.agent-performance-table tbody td{vertical-align:middle;padding-top:16px;padding-bottom:16px}
+.agent-performance-table tbody tr:hover{background:#fbf9ff}
+.segment-result{display:grid;justify-items:start;gap:6px}
+.segment-result-points{font-size:13px;white-space:nowrap}
+.segment-result-points strong{font-size:18px;color:#19243a}
+.segment-result-points span{color:#96a0b1}
+.segment-result-detail{display:grid;grid-template-columns:repeat(2,max-content);gap:1px 12px;font-size:10px;color:#8793a4}
+.segment-result-detail span:last-child{grid-column:1/-1}
+.segment-result-detail b{color:#293950}
+.segment-result .pill{margin-top:2px}
