@@ -65,7 +65,10 @@ export default function Page(){
  const leaders=[...new Set(people.map(a=>a.team_leader).filter((v):v is string=>!!v))].sort();
  const scoped=people.filter(a=>!a.is_team_leader&&(!leader||a.team_leader===leader)&&(!selected||a.tabs===selected));
  const scopedTabs=new Set(scoped.map(a=>a.tabs));
- const monthSales=sales.filter(s=>s.month===month);
+ // Project-wide counting rule: only positive-point subscriber sales contribute to
+ // counts, trends or achievements. Preserve zero-point records in Supabase so
+ // campaign mapping or manual point overrides can make them count later.
+ const monthSales=sales.filter(s=>s.month===month&&pointOf(s)>0);
  const directLeaderSales=monthSales.filter(s=>!activeTabs.has(s.tabs)&&!!leaderByTabs[s.tabs]&&leaders.includes(leaderByTabs[s.tabs]));
  const directLeaderSubs=new Set(directLeaderSales.map(s=>s.subno));
  const unassigned=monthSales.filter(s=>!directLeaderSubs.has(s.subno)&&(!activeTabs.has(s.tabs)||agents.some(a=>a.tabs===s.tabs&&a.is_team_leader)));
